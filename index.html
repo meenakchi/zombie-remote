@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Zombie Protocol Rescue Tool</title>
+<link rel="stylesheet" href="style.css" />
+<script src="https://cdn.jsdelivr.net/npm/ethers@6.13.2/dist/ethers.umd.min.js"></script>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>🧟 ZOMBIE PROTOCOL RESCUE TOOL</h1>
+      <p>a universal remote for abandoned smart contracts</p>
+    </header>
+
+    <div class="panel">
+      <h2>1 &middot; Wallet</h2>
+      <div class="row">
+        <button id="connect-btn">Connect Wallet</button>
+        <span id="wallet-status" class="status-bar">Not connected (read-only mode still works)</span>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>2 &middot; Target Contract</h2>
+      <div class="row">
+        <select id="network-select"></select>
+        <input type="text" id="contract-address" placeholder="0x... contract address" />
+      </div>
+      <div class="row" style="margin-top:10px;">
+        <input type="password" id="etherscan-key" placeholder="Explorer API key (optional if set in config.js)" />
+        <button id="load-btn">Decode Contract</button>
+      </div>
+      <div id="load-status" class="status-bar"></div>
+    </div>
+
+    <div id="rescue-section" class="panel" style="display:none;">
+      <h2>⚠ Possible Rescue Functions</h2>
+      <div id="rescue-list"></div>
+    </div>
+
+    <div id="all-functions-section" class="panel" style="display:none;">
+      <h2>All Functions <span id="fn-source-badge"></span></h2>
+      <div id="all-functions-list"></div>
+    </div>
+
+    <div id="empty-panel" class="panel">
+      <div class="empty-state">Paste a contract address above and hit "Decode Contract" to generate its interface.</div>
+    </div>
+
+    <p class="footer-note">
+      Verified contracts pull ABI from the explorer API. Unverified contracts fall back to
+      on-chain bytecode selector decoding. Guessed functions are always labeled — never assume
+      a guessed ABI is 100% accurate before signing a transaction.
+    </p>
+  </div>
+
+  <script src="config.example.js"></script>
+  <script>
+    // If the user has created their own config.js (copied from config.example.js),
+    // load it instead so their real API key isn't the one shipped in the zip.
+    (function tryLoadRealConfig() {
+      const s = document.createElement("script");
+      s.src = "config.js";
+      s.onerror = () => console.info("No config.js found — using config.example.js defaults.");
+      document.head.appendChild(s);
+    })();
+  </script>
+  <script src="abi-decoder.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
