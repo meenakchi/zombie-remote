@@ -35,9 +35,18 @@ window.ZOMBIE_CONFIG = {
       explorerApi: "https://api.bscscan.com/api",
       rpc: "https://bsc-dataseed.binance.org",
     },
+    sepolia: {
+      label: "Ethereum Sepolia (Testnet)",
+      chainId: 11155111,
+      explorerApi: "https://api-sepolia.etherscan.io/api",
+      rpc: "https://rpc.ankr.com/eth_sepolia",
+    },
   },
 
   DEFAULT_NETWORK: "ethereum",
+
+  // Set this to a real testnet contract you control for the live demo.
+  DEMO_CONTRACT: { address: "0x...", network: "sepolia" },
 
   // Safety switch for live demos — read/simulate always works regardless.
   // Flip to true once you've tested end-to-end and want live tx sending.

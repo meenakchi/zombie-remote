@@ -3,70 +3,74 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Zombie Protocol Rescue Tool</title>
+<meta name="description" content="Zombie Rescue — recovery intelligence for abandoned smart contracts." />
+<title>Zombie Rescue — Smart Contract Recovery</title>
 <link rel="stylesheet" href="style.css" />
 <script src="https://cdn.jsdelivr.net/npm/ethers@6.13.2/dist/ethers.umd.min.js"></script>
 </head>
 <body>
-  <div class="container">
-    <header>
-      <h1>🧟 ZOMBIE PROTOCOL RESCUE TOOL</h1>
-      <p>a universal remote for abandoned smart contracts</p>
+  <main class="container">
+    <header class="hero">
+      <div class="eyebrow">WEB3 RECOVERY INTELLIGENCE</div>
+      <h1>🧟 Zombie Rescue</h1>
+      <p class="hero-copy">Turn abandoned smart contracts into explainable, simulated, and safely recoverable assets.</p>
+      <div class="hero-flow"><span>SCAN</span><b>→</b><span>DISCOVER</span><b>→</b><span>SIMULATE</span><b>→</b><span>RESCUE</span></div>
     </header>
 
-    <div class="panel">
-      <h2>1 &middot; Wallet</h2>
+    <section class="panel">
+      <div class="section-head"><div><span class="step">01</span><h2>Connect wallet</h2></div><span class="muted">Read-only scanning works without a wallet.</span></div>
       <div class="row">
         <button id="connect-btn">Connect Wallet</button>
-        <span id="wallet-status" class="status-bar">Not connected (read-only mode still works)</span>
+        <span id="wallet-status" class="status-bar">Not connected</span>
       </div>
-    </div>
+    </section>
 
-    <div class="panel">
-      <h2>2 &middot; Target Contract</h2>
+    <section class="panel target-panel">
+      <div class="section-head"><div><span class="step">02</span><h2>Scan target contract</h2></div><button id="demo-btn" class="secondary">Load demo</button></div>
       <div class="row">
-        <select id="network-select"></select>
-        <input type="text" id="contract-address" placeholder="0x... contract address" />
+        <select id="network-select" aria-label="Network"></select>
+        <input type="text" id="contract-address" placeholder="0x… contract address" autocomplete="off" />
       </div>
-      <div class="row" style="margin-top:10px;">
-        <input type="password" id="etherscan-key" placeholder="Explorer API key (optional if set in config.js)" />
-        <button id="load-btn">Decode Contract</button>
+      <div class="row controls">
+        <input type="password" id="etherscan-key" placeholder="Explorer API key (optional)" autocomplete="off" />
+        <button id="load-btn">Scan Contract</button>
       </div>
+      <div id="network-warning" class="warning" hidden></div>
       <div id="load-status" class="status-bar"></div>
-    </div>
+    </section>
 
-    <div id="rescue-section" class="panel" style="display:none;">
-      <h2>⚠ Possible Rescue Functions</h2>
+    <section id="scan-summary" class="panel summary-panel" hidden>
+      <div class="section-head"><div><span class="step">03</span><h2>Recovery intelligence</h2></div><span id="contract-status" class="pill">—</span></div>
+      <div class="summary-grid">
+        <div class="metric"><span>Native balance</span><strong id="native-balance">—</strong></div>
+        <div class="metric"><span>Recovery paths</span><strong id="recovery-count">—</strong></div>
+        <div class="metric"><span>Best confidence</span><strong id="recovery-score">—</strong></div>
+        <div class="metric"><span>Owner analysis</span><strong id="owner-status">—</strong></div>
+      </div>
+      <div class="notice"><strong>Safety model:</strong> verified functions can be simulated and, when enabled, executed. Bytecode-reconstructed functions remain simulation-only.</div>
+    </section>
+
+    <section id="rescue-section" class="panel rescue-panel" hidden>
+      <div class="section-head"><div><span class="step">04</span><h2>Possible rescue paths</h2></div><button id="export-btn" class="secondary">Export ABI</button></div>
       <div id="rescue-list"></div>
-    </div>
+    </section>
 
-    <div id="all-functions-section" class="panel" style="display:none;">
-      <h2>All Functions <span id="fn-source-badge"></span></h2>
+    <section id="all-functions-section" class="panel" hidden>
+      <div class="section-head"><div><span class="step">05</span><h2>Contract interface</h2></div><span id="fn-source-badge"></span></div>
       <div id="all-functions-list"></div>
-    </div>
+    </section>
 
-    <div id="empty-panel" class="panel">
-      <div class="empty-state">Paste a contract address above and hit "Decode Contract" to generate its interface.</div>
-    </div>
+    <section id="empty-panel" class="panel empty-panel">
+      <div class="empty-state"><div class="empty-icon">🧟</div><h2>Find the zombie</h2><p>Paste an EVM contract address to inspect its bytecode, assets, access control, and potential recovery paths.</p></div>
+    </section>
 
-    <p class="footer-note">
-      Verified contracts pull ABI from the explorer API. Unverified contracts fall back to
-      on-chain bytecode selector decoding. Guessed functions are always labeled — never assume
-      a guessed ABI is 100% accurate before signing a transaction.
-    </p>
-  </div>
-
+    <footer>
+      <p>Zombie Rescue is an analysis and safety tool. Never sign a transaction you do not understand.</p>
+      <p>Verified ABI data comes from the configured explorer. Unverified contracts use best-effort EVM selector analysis.</p>
+    </footer>
+  </main>
   <script src="config.example.js"></script>
-  <script>
-    // If the user has created their own config.js (copied from config.example.js),
-    // load it instead so their real API key isn't the one shipped in the zip.
-    (function tryLoadRealConfig() {
-      const s = document.createElement("script");
-      s.src = "config.js";
-      s.onerror = () => console.info("No config.js found — using config.example.js defaults.");
-      document.head.appendChild(s);
-    })();
-  </script>
+  <script src="config.js" onerror="void 0"></script>
   <script src="abi-decoder.js"></script>
   <script src="app.js"></script>
 </body>
