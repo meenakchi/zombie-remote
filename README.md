@@ -1,65 +1,42 @@
-# 🧟 Zombie Rescue
+# zombie-remote
+A "universal remote" for abandoned smart contracts.
 
-**Recovery intelligence for abandoned smart contracts.**
+Thousands of DeFi contracts still hold withdrawable funds, but their frontends are dead, their teams vanished, or a UI never existed past a hackathon demo. If you know the contract address, the funds are still technically yours to pull — you just have no way to call the contract.
 
-Zombie Rescue scans an EVM contract, discovers its callable interface, checks native balance and common ownership signals, highlights potential recovery paths, and simulates state-changing calls before the user is asked to sign.
+This tool takes any contract address and:
 
-## What changed
+Fetches its verified ABI from Etherscan/block explorers (if verified).
+If unverified, decodes likely functions straight from the deployed bytecode using 4-byte function-selector analysis (via WhatsABI), so you still get a usable interface even with zero source code.
+Auto-generates a minimal interaction UI — one form per function — so you can call any function, including withdraw, claim, redeem, sweep, etc.
+Flags likely "rescue" functions (withdraw/claim/redeem/exit/sweep/emergency*) in their own highlighted section so you don't have to hunt through 40 functions.
+Lets you connect your wallet (MetaMask / any injected EIP-1193 provider) and send the transaction directly — no custom contract, no backend required.
+No build step. No framework. Just open index.html.
 
-- Redesigned recovery-first UI and judge-friendly scan flow.
-- Verified ABI vs bytecode-reconstructed functions are clearly separated.
-- Bytecode guesses are **simulation-only** by default.
-- Native ETH balance is shown as an immediate asset signal.
-- Common `owner()` access control is detected and compared with the connected wallet.
-- Recovery candidates receive an explainable confidence score.
-- State-changing functions support `eth_call` simulation and gas estimation before execution.
-- Network mismatch warnings prevent accidental signing on the wrong chain.
-- Payable functions expose an ETH value field.
-- BigInt-safe result formatting.
-- Export the discovered ABI as JSON.
-- Safer DOM rendering avoids injecting external ABI names through `innerHTML`.
-
-## Run locally
-
-This is a static app. Serve the directory with any local HTTP server; opening `index.html` directly may be blocked by browser CORS rules when calling RPC/explorer APIs.
-
-Example:
-
-```bash
-python3 -m http.server 8080
-```
-
-Then open `http://localhost:8080`.
-
-## Configuration
-
-Copy `config.example.js` to `config.js` and add your explorer API key if desired. `config.js` is ignored conceptually by the project instructions and should never be committed with a secret.
-
-Configure a real testnet contract for the demo:
-
-```js
-window.ZOMBIE_CONFIG.DEMO_CONTRACT = {
-  address: "0xYOUR_SEPOLIA_TEST_CONTRACT",
-  network: "sepolia"
-};
-```
-
-Use a contract you control and fund only with testnet assets for judging.
-
-## Safety model
-
-1. **Verified ABI:** normal read calls and, if explicitly enabled, live writes.
-2. **Bytecode decoded:** candidate selectors are labeled as guesses; live writes are disabled.
-3. **Simulation:** state-changing calls are estimated and simulated before execution.
-4. **Network validation:** the connected wallet must be on the selected target chain before signing.
-5. **Human confirmation:** the app never silently submits a transaction.
-
-## Limitations
-
-Bytecode selector extraction is heuristic and cannot reconstruct every Solidity type or function signature. A selector can have multiple possible text signatures. Asset discovery in this static build focuses on native balance; arbitrary ERC-20 enumeration requires an indexer/token-address source because an EVM contract does not expose a universal "list all tokens I own" method.
-
-For a production version, add proxy implementation discovery, ERC-20/721/1155 inventories, stronger dispatcher analysis, simulation traces, multisig support, and a backend/indexer for cross-chain asset discovery.
-
-## Hackathon pitch
-
-> **Zombie Rescue turns abandoned smart contracts from black boxes into explainable, simulated, and safely recoverable assets.**
+Why this is a good hackathon submission
+It's a tool, not a product. No fake user growth pitch — it solves a real, narrow, technically satisfying problem: bytecode → usable UI.
+Demoable in under 2 minutes: paste an old/abandoned/orphaned contract address → watch it generate a full call interface live.
+Actually novel-ish angle: most "contract explorer" tools (Etherscan's own Read/Write Contract tabs) require a verified contract. This one still works when there's no ABI at all, via selector decoding — that's the technical hook.
+Project structure
+zombie-protocol-rescue/
+├── README.md              <- you are here
+├── index.html             <- the whole app shell
+├── style.css              <- dark "terminal/forensics" themed UI
+├── app.js                 <- wallet connect, ABI fetch, bytecode decode, dynamic form generation
+├── abi-decoder.js          <- bytecode -> function selector -> best-guess ABI logic
+└── config.example.js       <- where to put your free Etherscan API key
+Setup (2 minutes)
+Unzip this folder.
+Copy config.example.js to config.js and paste in a free Etherscan API key (get one instantly at https://etherscan.io/myapikey — no approval wait). You can also just paste the key into the app's settings field at runtime; config.js is only a convenience default.
+Open index.html in a browser (or run any static server, e.g. npx serve .).
+Make sure MetaMask (or similar) is installed if you want to actually send transactions — read-only inspection works without a wallet.
+Demo script for judges
+Paste in a known dead/abandoned contract address (or a testnet contract you deployed and "forgot" on purpose for the demo).
+Show the app pulling the verified ABI instantly and rendering every function as a form — point out the "Possible Rescue Functions" section auto-detected at the top.
+Then paste an unverified contract address and show the fallback path: the app disassembles the bytecode, extracts 4-byte selectors, matches them against the public 4byte.directory signature database, and still produces a working call UI with best-guess function names/params.
+Connect a wallet, call a read function live, then (optionally) simulate a write call to show the transaction being built.
+How the bytecode decoding actually works
+Fetch the deployed bytecode via eth_getCode.
+Scan the bytecode for PUSH4 opcodes immediately followed by comparison patterns (EQ/JUMPI) — this is how Solidity's function dispatcher checks msg.sig against known selectors. Each one found is a real callable 4-byte selector on that contract.
+Look up each selector against a local common-selector table (withdraw, claim, redeem, transfer, approve, etc.) and, if not found there, query the public 4byte.directory signature database.
+Build a best-guess ABI fragment for each match (name + guessed param types from the signature text) and feed it into the same dynamic-form renderer used for verified ABIs.
+This is exactly the same trick tools like WhatsABI / Etherscan's own "unverified contract" heuristics use — nothing exotic, just genuinely useful and not built into a friendly UI anywhere.
