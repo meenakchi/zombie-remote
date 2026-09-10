@@ -6,6 +6,7 @@ let currentAddress = null;
 let currentNetworkKey = null;
 let currentSource = null;
 let currentScan = null;
+let currentProxy = null;
 
 const $ = (id) => document.getElementById(id);
 const cfg = () => window.ZOMBIE_CONFIG;
@@ -37,14 +38,25 @@ function populateNetworkSelect() {
   });
 }
 
-async function connectWallet() {
+function getReadProvider(networkKey = currentNetworkKey) {
+  const net = cfg().NETWORKS[networkKey];
+  if (!net) throw new Error("Select a supported network before reading contract state.");
+  return new ethers.JsonRpcProvider(net.rpc);
+}
+
+async function connectWallet(requestAccounts = true, accounts = null) {
   if (!window.ethereum) {
     setStatus("wallet-status", "No injected wallet found. Read-only scanning still works.", "error");
     return;
   }
   try {
-    provider = new ethers.BrowserProvider(window.ethereum);
-    await provider.send("eth_requestAccounts", []);
+    provider ||= new ethers.BrowserProvider(window.ethereum);
+    if (requestAccounts) await provider.send("eth_requestAccounts", []);
+    if (Array.isArray(accounts) && accounts.length === 0) {
+      signer = null;
+      setStatus("wallet-status", "Wallet disconnected. Read-only scanning still works.");
+      return;
+    }
     signer = await provider.getSigner();
     const address = await signer.getAddress();
     const network = await provider.getNetwork();
@@ -61,9 +73,9 @@ async function connectWallet() {
   }
 }
 
-async function validateWalletNetwork(showError = true) {
-  if (!provider || !currentNetworkKey) return false;
-  const net = cfg().NETWORKS[currentNetworkKey];
+async function validateWalletNetwork(showError = true, networkKey = currentNetworkKey) {
+  if (!provider || !networkKey) return false;
+  const net = cfg().NETWORKS[networkKey];
   const actual = await provider.getNetwork();
   const ok = Number(actual.chainId) === Number(net.chainId);
   const banner = $("network-warning");
@@ -97,10 +109,43 @@ async function fetchBytecodeAbi(address, networkKey) {
   return window.ZombieDecoder.buildGuessedAbi(bytecode);
 }
 
+const EIP1967_SLOTS = {
+  implementation: "0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc",
+  admin: "0xb53127684a568b3173ae13b9f8a6016e243e63b6e8ee1178d6a717850b5d6103",
+  beacon: "0xa3f0ad74e5423aebfd80d3ef4346578335a9a72aeaeea7f1b2f6a4e5f2a7d50",
+};
+
+function addressFromStorage(value) {
+  const address = ethers.getAddress(`0x${value.slice(-40)}`);
+  return /^0x0{40}$/i.test(address) ? null : address;
+}
+
+async function detectProxy(address, networkKey) {
+  const readProvider = getReadProvider(networkKey);
+  const [implementationSlot, adminSlot, beaconSlot] = await Promise.all(
+    Object.values(EIP1967_SLOTS).map((slot) => readProvider.getStorage(address, slot))
+  );
+  const implementation = addressFromStorage(implementationSlot);
+  const beacon = addressFromStorage(beaconSlot);
+  let beaconImplementation = null;
+  if (beacon) {
+    try {
+      const beaconContract = new ethers.Contract(beacon, ["function implementation() view returns (address)"], readProvider);
+      beaconImplementation = await beaconContract.implementation();
+    } catch (_) {
+      beaconImplementation = null;
+    }
+  }
+  return {
+    implementation: implementation || beaconImplementation,
+    admin: addressFromStorage(adminSlot),
+    beacon,
+    kind: implementation ? "EIP-1967 proxy" : beaconImplementation ? "Beacon proxy" : null,
+  };
+}
+
 async function getContractBalance(address, networkKey) {
-  const net = cfg().NETWORKS[networkKey];
-  const rpc = provider || new ethers.JsonRpcProvider(net.rpc);
-  const balance = await rpc.getBalance(address);
+  const balance = await getReadProvider(networkKey).getBalance(address);
   return { raw: balance, formatted: ethers.formatEther(balance) };
 }
 
@@ -117,8 +162,7 @@ async function detectOwner(abi) {
   const ownerFn = getOwnerFunction(abi);
   if (!ownerFn || !currentAddress) return null;
   try {
-    const net = cfg().NETWORKS[currentNetworkKey];
-    const readProvider = provider || new ethers.JsonRpcProvider(net.rpc);
+    const readProvider = getReadProvider(currentNetworkKey);
     const contract = new ethers.Contract(currentAddress, [ownerFn], readProvider);
     return await contract.owner();
   } catch (_) {
@@ -169,6 +213,9 @@ function renderScanSummary() {
   $("owner-status").textContent = currentScan.owner
     ? `${shortAddress(currentScan.owner)}${currentScan.ownerMatches === true ? " · caller matches" : currentScan.ownerMatches === false ? " · caller does not match" : ""}`
     : "Not detected";
+  $("proxy-status").textContent = currentScan.proxy?.implementation
+    ? `${currentScan.proxy.kind} · ${shortAddress(currentScan.proxy.implementation)}`
+    : "Not detected";
   $("contract-status").textContent = currentScan.native.raw > 0n || currentScan.rescueFns.length ? "Recoverable signals found" : "No obvious rescue signal";
 }
 
@@ -185,24 +232,36 @@ async function decodeContract() {
   currentNetworkKey = networkKey;
   currentSource = null;
   currentScan = null;
+  currentProxy = null;
   setStatus("load-status", "Scanning contract…");
   $("load-btn").disabled = true;
   $("load-btn").textContent = "Scanning…";
 
   try {
+    try {
+      currentProxy = await detectProxy(currentAddress, networkKey);
+    } catch (e) {
+      console.warn("Proxy detection unavailable", e);
+      currentProxy = { implementation: null, admin: null, beacon: null, kind: null };
+    }
     let abi = null;
     try { abi = await fetchVerifiedAbi(currentAddress, networkKey, apiKey); } catch (e) { console.warn(e); }
+    if (!abi && currentProxy.implementation) {
+      try { abi = await fetchVerifiedAbi(currentProxy.implementation, networkKey, apiKey); } catch (e) { console.warn(e); }
+      if (abi) setStatus("load-status", "Proxy detected. Implementation ABI found; calls will target the proxy…");
+    }
     if (abi) {
       currentSource = "verified";
       setStatus("load-status", "Verified ABI found. Analyzing assets and recovery paths…");
     } else {
       currentSource = "decoded";
       setStatus("load-status", "No verified ABI. Inspecting deployed bytecode and resolving selectors…");
-      abi = await fetchBytecodeAbi(currentAddress, networkKey);
+      abi = await fetchBytecodeAbi(currentProxy.implementation || currentAddress, networkKey);
     }
     currentAbi = abi.filter((f) => f.type === "function");
     if (!currentAbi.length) throw new Error("No callable functions were discovered.");
     currentScan = await analyzeContract(currentAbi, currentSource);
+    currentScan.proxy = currentProxy;
     renderScanSummary();
     renderFunctions(currentAbi, currentSource);
     setStatus(
@@ -267,7 +326,11 @@ function buildFunctionCard(fn, source, uid) {
   if (isRescueFunction(fn.name)) badges.appendChild(makeBadge("rescue candidate", "rescue"));
   if (isGuessed) badges.appendChild(makeBadge("guessed", "guessed")); else badges.appendChild(makeBadge("verified", "verified"));
   title.append(left, badges);
-  title.addEventListener("click", () => card.classList.toggle("open"));
+  title.setAttribute("aria-expanded", "false");
+  title.addEventListener("click", () => {
+    const open = card.classList.toggle("open");
+    title.setAttribute("aria-expanded", String(open));
+  });
   card.appendChild(title);
 
   const body = document.createElement("div");
@@ -367,8 +430,10 @@ function getInterface(fn) {
 }
 
 async function simulateFunction(fn, args, ethValue = "0") {
-  const net = cfg().NETWORKS[currentNetworkKey];
-  const readProvider = provider || new ethers.JsonRpcProvider(net.rpc);
+  if (signer && !(await validateWalletNetwork(false))) {
+    throw new Error("Switch your wallet to the selected network before simulating.");
+  }
+  const readProvider = getReadProvider(currentNetworkKey);
   let from;
   if (signer) from = await signer.getAddress();
   const iface = getInterface(fn);
@@ -434,7 +499,9 @@ window.addEventListener("DOMContentLoaded", () => {
   $("load-btn").addEventListener("click", decodeContract);
   $("demo-btn").addEventListener("click", loadDemoContract);
   $("export-btn").addEventListener("click", exportAbi);
-  $("network-select").addEventListener("change", () => validateWalletNetwork(false));
-  window.addEventListener("ethereum#accountsChanged", connectWallet);
-  window.addEventListener("ethereum#chainChanged", () => validateWalletNetwork(false));
+  $("network-select").addEventListener("change", () => validateWalletNetwork(false, $("network-select").value));
+  if (window.ethereum?.on) {
+    window.ethereum.on("accountsChanged", (accounts) => connectWallet(false, accounts));
+    window.ethereum.on("chainChanged", () => validateWalletNetwork(false));
+  }
 });

@@ -21,7 +21,7 @@
       <div class="section-head"><div><span class="step">01</span><h2>Connect wallet</h2></div><span class="muted">Read-only scanning works without a wallet.</span></div>
       <div class="row">
         <button id="connect-btn">Connect Wallet</button>
-        <span id="wallet-status" class="status-bar">Not connected</span>
+        <span id="wallet-status" class="status-bar" role="status" aria-live="polite">Not connected</span>
       </div>
     </section>
 
@@ -35,8 +35,8 @@
         <input type="password" id="etherscan-key" placeholder="Explorer API key (optional)" autocomplete="off" />
         <button id="load-btn">Scan Contract</button>
       </div>
-      <div id="network-warning" class="warning" hidden></div>
-      <div id="load-status" class="status-bar"></div>
+      <div id="network-warning" class="warning" role="alert" hidden></div>
+      <div id="load-status" class="status-bar" role="status" aria-live="polite"></div>
     </section>
 
     <section id="scan-summary" class="panel summary-panel" hidden>
@@ -46,6 +46,7 @@
         <div class="metric"><span>Recovery paths</span><strong id="recovery-count">—</strong></div>
         <div class="metric"><span>Best confidence</span><strong id="recovery-score">—</strong></div>
         <div class="metric"><span>Owner analysis</span><strong id="owner-status">—</strong></div>
+        <div class="metric"><span>Proxy analysis</span><strong id="proxy-status">—</strong></div>
       </div>
       <div class="notice"><strong>Safety model:</strong> verified functions can be simulated and, when enabled, executed. Bytecode-reconstructed functions remain simulation-only.</div>
     </section>

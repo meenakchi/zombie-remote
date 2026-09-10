@@ -50,7 +50,7 @@ window.ZOMBIE_CONFIG = {
 
   // Safety switch for live demos — read/simulate always works regardless.
   // Flip to true once you've tested end-to-end and want live tx sending.
-  SEND_TX_ENABLED: true,
+  SEND_TX_ENABLED: false,
 
   // Words that flag a function as a likely "rescue" candidate for the
   // highlighted section at the top of the generated UI.
