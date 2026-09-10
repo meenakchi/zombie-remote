@@ -78,27 +78,29 @@ function extractSelectors(bytecodeHex) {
  */
 async function resolveSelector(selector) {
   if (KNOWN_SELECTORS[selector]) {
-    return { ...KNOWN_SELECTORS[selector], source: "known-table" };
+    return { ...KNOWN_SELECTORS[selector], candidates: [KNOWN_SELECTORS[selector]], source: "known-table" };
   }
 
   try {
-    const res = await fetch(
-      `https://www.4byte.directory/api/v1/signatures/?hex_signature=${selector}`
-    );
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 8000);
+    const res = await fetch(`https://www.4byte.directory/api/v1/signatures/?hex_signature=${selector}`, { signal: controller.signal });
+    clearTimeout(timeout);
     const data = await res.json();
     if (data.results && data.results.length > 0) {
       // 4byte.directory returns raw text signatures like "withdraw(uint256)".
       // Multiple candidates can share a selector (collisions); take the
       // earliest-registered one as the best guess, same convention Etherscan uses.
-      const best = data.results.sort((a, b) => a.id - b.id)[0];
-      const parsed = parseSignatureText(best.text_signature);
-      return { ...parsed, source: "4byte.directory" };
+      const candidates = data.results
+        .sort((a, b) => a.id - b.id)
+        .map((result) => parseSignatureText(result.text_signature));
+      return { ...candidates[0], candidates, source: "4byte.directory" };
     }
   } catch (e) {
     // Offline / rate-limited — fall through to unknown.
   }
 
-  return { name: `unknown_${selector.slice(2, 8)}`, inputs: [], source: "unresolved" };
+  return { name: `unknown_${selector.slice(2, 8)}`, inputs: [], candidates: [], source: "unresolved" };
 }
 
 /** Parses "transferFrom(address,address,uint256)" into name + typed inputs. */
@@ -106,10 +108,20 @@ function parseSignatureText(sig) {
   const match = sig.match(/^([a-zA-Z0-9_]+)\((.*)\)$/);
   if (!match) return { name: sig, inputs: [] };
   const [, name, argsStr] = match;
-  const inputs = argsStr
-    .split(",")
-    .filter(Boolean)
-    .map((type, idx) => ({ type: type.trim(), name: `arg${idx}` }));
+  const types = [];
+  let depth = 0;
+  let start = 0;
+  for (let index = 0; index <= argsStr.length; index++) {
+    const char = argsStr[index];
+    if (char === "(") depth++;
+    if (char === ")") depth--;
+    if ((char === "," && depth === 0) || index === argsStr.length) {
+      const type = argsStr.slice(start, index).trim();
+      if (type) types.push(type);
+      start = index + 1;
+    }
+  }
+  const inputs = types.map((type, idx) => ({ type, name: `arg${idx}` }));
   return { name, inputs };
 }
 
@@ -130,6 +142,8 @@ async function buildGuessedAbi(bytecodeHex) {
       inputs: resolved.inputs,
       outputs: [], // unknown without source — renderer treats these as best-effort
       stateMutability: "nonpayable", // unknown; safest assumption for the UI to warn on
+      _mutabilityConfidence: "unknown",
+      _candidates: resolved.candidates || [],
       _decoded: true,
       _source: resolved.source,
     });

@@ -30,9 +30,14 @@ Give `zombie-remote` a contract address and it will:
 * 🧩 Extract `PUSH4` function selectors from the contract dispatcher
 * 🔤 Resolve selectors using a local signature database and [4byte.directory](https://www.4byte.directory/)
 * 🖥️ Automatically generate a minimal UI for interacting with discovered functions
-* 🚨 Detect likely **rescue functions** such as `withdraw`, `claim`, `redeem`, `exit`, `sweep`, and `emergency*`
+* 🚨 Highlight likely recovery-related functions such as `withdraw`, `claim`, `redeem`, `exit`, `sweep`, and `emergency*`
 * 👛 Connect directly to an injected EIP-1193 wallet such as MetaMask
 * ⛓️ Read from and write to the contract directly from the browser
+* 🧬 Detect common EIP-1967 and beacon proxies before recovering an ABI
+* ⚠️ Show mutability uncertainty and emergency-function warnings
+* 🧾 Keep local function-call history and bookmarks in the browser
+* 💰 Detect selected ERC-20 balances held by the target contract
+* 📈 Analyze recent event activity and calculate a contract risk score
 
 The goal is simple:
 
@@ -117,13 +122,13 @@ Both paths ultimately feed the same interface generator.
 
 ---
 
-## 🚨 Possible Rescue Functions section.
+## 🚨 Possible Recovery Functions
 
-This means users don't have to scroll through dozens of unrelated functions just to find the one that might let them recover assets.
+This means a rightful owner or authorized operator does not have to scroll through dozens of unrelated functions while investigating their own contract or recovering their own assets. Finding a selector does **not** grant permission to call it: access control such as `onlyOwner`, role checks, pausability, and other contract rules still apply. An unauthorized call should revert, and users must verify ownership, authorization, destination, parameters, and expected effects before signing anything.
 
-> **Important:** These are heuristic matches, not guarantees that a function can safely recover funds.
+> **Important:** These are heuristic matches, not guarantees that a function can safely recover funds or that the connected wallet is authorized.
 
-Always inspect the function, parameters, contract behavior, and transaction before signing.
+Always inspect the function, parameters, contract behavior, authorization rules, and transaction before signing.
 
 ---
 
@@ -432,6 +437,8 @@ https://etherscan.io/myapikey
 
 The application can also allow the key to be entered at runtime, so `config.js` is only a convenience default.
 
+> **MVP limitation:** this is a browser-only demo, so any explorer API key entered in `config.js` or the form is visible to the user and should be treated as public. Use a restricted, rate-limited demo key only. A production deployment should proxy explorer requests through a backend or serverless function and keep the key there.
+
 ---
 
 ## 3. Run the application
@@ -455,6 +462,8 @@ You can also host the project on any static hosting provider.
 # ⚠️ Limitations
 
 Bytecode-based ABI recovery is inherently heuristic.
+
+The tool is intended for owners and authorized operators investigating or recovering assets from contracts they control. Discovering a function selector is not an authorization mechanism. Contract-level rules such as `onlyOwner`, role checks, pausability, and custom validation still decide whether a call succeeds; unauthorized calls should revert.
 
 `zombie-remote` cannot guarantee that:
 

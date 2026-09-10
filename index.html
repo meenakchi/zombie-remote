@@ -39,25 +39,34 @@
       <div id="load-status" class="status-bar" role="status" aria-live="polite"></div>
     </section>
 
+    <section class="panel history-panel">
+      <div class="section-head"><div><span class="step">03</span><h2>History & bookmarks</h2></div><span class="muted">Stored locally in this browser</span></div>
+      <div id="history-list" class="history-list"></div>
+      <p id="history-empty" class="muted">Your scanned functions and bookmarks will appear here.</p>
+    </section>
+
     <section id="scan-summary" class="panel summary-panel" hidden>
-      <div class="section-head"><div><span class="step">03</span><h2>Recovery intelligence</h2></div><span id="contract-status" class="pill">—</span></div>
+      <div class="section-head"><div><span class="step">04</span><h2>Recovery intelligence</h2></div><span id="contract-status" class="pill">—</span></div>
       <div class="summary-grid">
         <div class="metric"><span>Native balance</span><strong id="native-balance">—</strong></div>
         <div class="metric"><span>Recovery paths</span><strong id="recovery-count">—</strong></div>
         <div class="metric"><span>Best confidence</span><strong id="recovery-score">—</strong></div>
         <div class="metric"><span>Owner analysis</span><strong id="owner-status">—</strong></div>
         <div class="metric"><span>Proxy analysis</span><strong id="proxy-status">—</strong></div>
+        <div class="metric"><span>Token balances</span><strong id="token-status">—</strong></div>
+        <div class="metric"><span>Recent activity</span><strong id="activity-status">—</strong></div>
+        <div class="metric"><span>Risk score</span><strong id="risk-status">—</strong></div>
       </div>
       <div class="notice"><strong>Safety model:</strong> verified functions can be simulated and, when enabled, executed. Bytecode-reconstructed functions remain simulation-only.</div>
     </section>
 
     <section id="rescue-section" class="panel rescue-panel" hidden>
-      <div class="section-head"><div><span class="step">04</span><h2>Possible rescue paths</h2></div><button id="export-btn" class="secondary">Export ABI</button></div>
+      <div class="section-head"><div><span class="step">05</span><h2>Possible rescue paths</h2></div><button id="export-btn" class="secondary">Export ABI</button></div>
       <div id="rescue-list"></div>
     </section>
 
     <section id="all-functions-section" class="panel" hidden>
-      <div class="section-head"><div><span class="step">05</span><h2>Contract interface</h2></div><span id="fn-source-badge"></span></div>
+      <div class="section-head"><div><span class="step">06</span><h2>Contract interface</h2></div><span id="fn-source-badge"></span></div>
       <div id="all-functions-list"></div>
     </section>
 

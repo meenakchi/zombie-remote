@@ -26,6 +26,77 @@ function safeStringify(value) {
   return JSON.stringify(value, (_, v) => typeof v === "bigint" ? v.toString() : v, 2);
 }
 
+const HISTORY_STORAGE_KEY = "zombie-rescue-call-history";
+const BOOKMARK_STORAGE_KEY = "zombie-rescue-function-bookmarks";
+
+function readStorage(key, fallback) {
+  try { return JSON.parse(localStorage.getItem(key) || JSON.stringify(fallback)); } catch (_) { return fallback; }
+}
+
+function writeStorage(key, value) {
+  try { localStorage.setItem(key, JSON.stringify(value)); } catch (_) { /* private browsing may block storage */ }
+}
+
+function functionSignature(fn) {
+  return `${fn.name}(${(fn.inputs || []).map((input) => input.type).join(",")})`;
+}
+
+function functionKey(fn, address = currentAddress, networkKey = currentNetworkKey) {
+  return `${networkKey}:${address}:${fn.selector || functionSignature(fn)}`;
+}
+
+function isEmergencyFunction(name = "") {
+  return /emergency|drain|rescue|sweep|recover/i.test(name);
+}
+
+function recordCall(fn, status) {
+  const history = readStorage(HISTORY_STORAGE_KEY, []);
+  history.unshift({
+    key: functionKey(fn),
+    address: currentAddress,
+    networkKey: currentNetworkKey,
+    signature: functionSignature(fn),
+    status,
+    timestamp: new Date().toISOString(),
+  });
+  writeStorage(HISTORY_STORAGE_KEY, history.slice(0, 30));
+  renderHistory();
+}
+
+function toggleBookmark(fn) {
+  const bookmarks = readStorage(BOOKMARK_STORAGE_KEY, []);
+  const key = functionKey(fn);
+  const index = bookmarks.findIndex((bookmark) => bookmark.key === key);
+  if (index >= 0) bookmarks.splice(index, 1);
+  else bookmarks.unshift({ key, address: currentAddress, networkKey: currentNetworkKey, signature: functionSignature(fn) });
+  writeStorage(BOOKMARK_STORAGE_KEY, bookmarks.slice(0, 50));
+  renderHistory();
+}
+
+function renderHistory() {
+  const list = $("history-list");
+  if (!list) return;
+  list.replaceChildren();
+  const bookmarks = readStorage(BOOKMARK_STORAGE_KEY, []);
+  const history = readStorage(HISTORY_STORAGE_KEY, []);
+  [...bookmarks.map((item) => ({ ...item, kind: "bookmark" })), ...history.map((item) => ({ ...item, kind: "call" }))]
+    .slice(0, 12)
+    .forEach((item) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "history-item";
+      button.textContent = `${item.kind === "bookmark" ? "★" : "↗"} ${item.signature} · ${item.networkKey}`;
+      button.title = item.address;
+      button.addEventListener("click", () => {
+        $("contract-address").value = item.address;
+        $("network-select").value = item.networkKey;
+        decodeContract();
+      });
+      list.appendChild(button);
+    });
+  $("history-empty").hidden = list.children.length > 0;
+}
+
 function populateNetworkSelect() {
   const select = $("network-select");
   select.replaceChildren();
@@ -114,6 +185,7 @@ const EIP1967_SLOTS = {
   admin: "0xb53127684a568b3173ae13b9f8a6016e243e63b6e8ee1178d6a717850b5d6103",
   beacon: "0xa3f0ad74e5423aebfd80d3ef4346578335a9a72aeaeea7f1b2f6a4e5f2a7d50",
 };
+const IMPLEMENTATION_SLOT = EIP1967_SLOTS.implementation;
 
 function addressFromStorage(value) {
   const address = ethers.getAddress(`0x${value.slice(-40)}`);
@@ -127,6 +199,15 @@ async function detectProxy(address, networkKey) {
   );
   const implementation = addressFromStorage(implementationSlot);
   const beacon = addressFromStorage(beaconSlot);
+  let uups = false;
+  if (implementation) {
+    try {
+      const implementationContract = new ethers.Contract(implementation, ["function proxiableUUID() view returns (bytes32)"], readProvider);
+      uups = (await implementationContract.proxiableUUID()).toLowerCase() === IMPLEMENTATION_SLOT;
+    } catch (_) {
+      uups = false;
+    }
+  }
   let beaconImplementation = null;
   if (beacon) {
     try {
@@ -140,7 +221,7 @@ async function detectProxy(address, networkKey) {
     implementation: implementation || beaconImplementation,
     admin: addressFromStorage(adminSlot),
     beacon,
-    kind: implementation ? "EIP-1967 proxy" : beaconImplementation ? "Beacon proxy" : null,
+    kind: implementation ? (uups ? "UUPS proxy" : "EIP-1967 proxy") : beaconImplementation ? "Beacon proxy" : null,
   };
 }
 
@@ -189,16 +270,78 @@ function scoreLabel(score) {
   return "LOW CONFIDENCE";
 }
 
+const ERC20_ABI = [
+  "function balanceOf(address) view returns (uint256)",
+  "function decimals() view returns (uint8)",
+  "function symbol() view returns (string)",
+];
+
+const COMMON_TOKENS = {
+  ethereum: [
+    ["USDC", "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"],
+    ["USDT", "0xdAC17F958D2ee523a2206206994597C13D831ec7"],
+    ["DAI", "0x6B175474E89094C44Da98b954EedeAC495271d0F"],
+  ],
+  polygon: [["USDC.e", "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"]],
+};
+
+async function detectTokenBalances(address, networkKey) {
+  const readProvider = getReadProvider(networkKey);
+  const balances = [];
+  for (const [knownSymbol, tokenAddress] of COMMON_TOKENS[networkKey] || []) {
+    try {
+      const contract = new ethers.Contract(tokenAddress, ERC20_ABI, readProvider);
+      const balance = await contract.balanceOf(address);
+      if (balance > 0n) {
+        const [decimals, symbol] = await Promise.all([contract.decimals(), contract.symbol().catch(() => knownSymbol)]);
+        balances.push({ token: tokenAddress, balance, symbol: symbol || knownSymbol, decimals: Number(decimals) });
+      }
+    } catch (_) {
+      // A missing token or restricted RPC should not abort the contract scan.
+    }
+  }
+  return balances;
+}
+
+async function analyzeRecentActivity(address, networkKey) {
+  try {
+    const readProvider = getReadProvider(networkKey);
+    const latest = await readProvider.getBlockNumber();
+    const from = Math.max(0, latest - 5000);
+    const logs = await readProvider.getLogs({ address, fromBlock: from, toBlock: latest });
+    const transferTopic = ethers.id("Transfer(address,address,uint256)").toLowerCase();
+    const transfers = logs.filter((log) => log.topics[0]?.toLowerCase() === transferTopic);
+    return { recentActivityBlocks: latest - from, eventCount: logs.length, transfers: transfers.length, lastActive: transfers.length ? "Recently" : "Dormant" };
+  } catch (_) {
+    return { recentActivityBlocks: 0, eventCount: null, transfers: null, lastActive: "Unavailable" };
+  }
+}
+
+function calculateContractRisk({ source, rescueFns, proxy, activity }) {
+  let score = 20;
+  if (source !== "verified") score += 30;
+  if (rescueFns.length) score += Math.min(20, rescueFns.length * 4);
+  if (proxy?.implementation) score += 15;
+  if (activity.lastActive === "Recently") score += 10;
+  if (rescueFns.some((fn) => isEmergencyFunction(fn.name))) score += 15;
+  return Math.min(100, score);
+}
+
 async function analyzeContract(abi, source) {
-  const native = await getContractBalance(currentAddress, currentNetworkKey);
-  const owner = await detectOwner(abi);
+  const [native, owner, tokens, activity] = await Promise.all([
+    getContractBalance(currentAddress, currentNetworkKey),
+    detectOwner(abi),
+    detectTokenBalances(currentAddress, currentNetworkKey),
+    analyzeRecentActivity(currentAddress, currentNetworkKey),
+  ]);
   let ownerMatches = null;
   if (owner && signer) ownerMatches = owner.toLowerCase() === (await signer.getAddress()).toLowerCase();
   const rescueFns = abi.filter((fn) => isRescueFunction(fn.name));
   rescueFns.forEach((fn) => {
     fn._recoveryScore = calculateRecoveryScore({ fn, source, hasNativeBalance: native.raw > 0n, ownerMatches });
   });
-  return { native, owner, ownerMatches, rescueFns };
+  const riskScore = calculateContractRisk({ source, rescueFns, proxy: currentProxy, activity });
+  return { native, owner, ownerMatches, rescueFns, tokens, activity, riskScore };
 }
 
 function renderScanSummary() {
@@ -214,8 +357,13 @@ function renderScanSummary() {
     ? `${shortAddress(currentScan.owner)}${currentScan.ownerMatches === true ? " · caller matches" : currentScan.ownerMatches === false ? " · caller does not match" : ""}`
     : "Not detected";
   $("proxy-status").textContent = currentScan.proxy?.implementation
-    ? `${currentScan.proxy.kind} · ${shortAddress(currentScan.proxy.implementation)}`
+    ? `${currentScan.proxy.kind} · ${shortAddress(currentScan.proxy.implementation)}${currentScan.proxy.admin ? ` · admin ${shortAddress(currentScan.proxy.admin)}` : ""}`
     : "Not detected";
+  $("token-status").textContent = currentScan.tokens.length ? currentScan.tokens.map((token) => `${token.symbol} ${ethers.formatUnits(token.balance, token.decimals)}`).join(" · ") : "None detected";
+  $("activity-status").textContent = currentScan.activity.eventCount == null
+    ? "Unavailable"
+    : `${currentScan.activity.lastActive} · ${currentScan.activity.eventCount} events · ${currentScan.activity.transfers} transfers`;
+  $("risk-status").textContent = `${currentScan.riskScore}/100 · ${currentScan.riskScore >= 70 ? "high" : currentScan.riskScore >= 40 ? "medium" : "low"}`;
   $("contract-status").textContent = currentScan.native.raw > 0n || currentScan.rescueFns.length ? "Recoverable signals found" : "No obvious rescue signal";
 }
 
@@ -311,6 +459,7 @@ function buildFunctionCard(fn, source, uid) {
   card.dataset.uid = uid;
   const isView = fn.stateMutability === "view" || fn.stateMutability === "pure";
   const isGuessed = source !== "verified";
+  const mutabilityUnknown = fn._mutabilityConfidence === "unknown";
 
   const title = document.createElement("button");
   title.className = "fn-title";
@@ -324,6 +473,7 @@ function buildFunctionCard(fn, source, uid) {
   left.append(name, sig);
   const badges = document.createElement("span");
   if (isRescueFunction(fn.name)) badges.appendChild(makeBadge("rescue candidate", "rescue"));
+  badges.appendChild(makeBadge(mutabilityUnknown ? "mutability unknown" : fn.stateMutability, mutabilityUnknown ? "guessed" : "verified"));
   if (isGuessed) badges.appendChild(makeBadge("guessed", "guessed")); else badges.appendChild(makeBadge("verified", "verified"));
   title.append(left, badges);
   title.setAttribute("aria-expanded", "false");
@@ -340,6 +490,20 @@ function buildFunctionCard(fn, source, uid) {
   if (fn._recoveryScore != null) evidence.textContent = `${scoreLabel(fn._recoveryScore)} · recovery score ${fn._recoveryScore}/100`;
   else evidence.textContent = isGuessed ? "Reconstructed from bytecode. Signature and mutability may be incomplete." : "Source ABI verified by explorer.";
   body.appendChild(evidence);
+
+  if (isEmergencyFunction(fn.name)) {
+    const warning = document.createElement("div");
+    warning.className = "warning function-warning";
+    warning.textContent = "High-risk function name. Review access control, destination, and asset effects before simulating or signing.";
+    body.appendChild(warning);
+  }
+
+  if (isGuessed && fn._candidates?.length > 1) {
+    const ambiguity = document.createElement("div");
+    ambiguity.className = "notice function-warning";
+    ambiguity.textContent = `${fn._candidates.length} possible signatures found for this selector. Showing the earliest indexed candidate; verify the signature before using it.`;
+    body.appendChild(ambiguity);
+  }
 
   const inputEls = [];
   (fn.inputs || []).forEach((inp, idx) => {
@@ -372,6 +536,17 @@ function buildFunctionCard(fn, source, uid) {
 
   const actions = document.createElement("div");
   actions.className = "row actions";
+  const bookmarkBtn = document.createElement("button");
+  bookmarkBtn.type = "button";
+  bookmarkBtn.className = "secondary bookmark-btn";
+  const bookmarks = readStorage(BOOKMARK_STORAGE_KEY, []);
+  const bookmarked = bookmarks.some((bookmark) => bookmark.key === functionKey(fn));
+  bookmarkBtn.textContent = bookmarked ? "★ Bookmarked" : "☆ Bookmark";
+  bookmarkBtn.addEventListener("click", () => {
+    toggleBookmark(fn);
+    bookmarkBtn.textContent = readStorage(BOOKMARK_STORAGE_KEY, []).some((bookmark) => bookmark.key === functionKey(fn)) ? "★ Bookmarked" : "☆ Bookmark";
+  });
+  actions.appendChild(bookmarkBtn);
   const simulateBtn = document.createElement("button");
   simulateBtn.type = "button";
   simulateBtn.textContent = isView ? "Call read-only" : "Simulate first";
@@ -406,8 +581,10 @@ function buildFunctionCard(fn, source, uid) {
       const value = valueInput && valueInput.value.trim() ? valueInput.value.trim() : "0";
       const result = await simulateFunction(fn, args, value);
       resultBox.textContent = result;
+      recordCall(fn, "simulation succeeded");
     } catch (e) {
       resultBox.textContent = `Simulation failed: ${e.reason || e.shortMessage || e.message || e}`;
+      recordCall(fn, "simulation failed");
     }
   });
 
@@ -429,7 +606,7 @@ function getInterface(fn) {
   return new ethers.Interface([fn]);
 }
 
-async function simulateFunction(fn, args, ethValue = "0") {
+async function enhancedSimulation(fn, args, ethValue = "0") {
   if (signer && !(await validateWalletNetwork(false))) {
     throw new Error("Switch your wallet to the selected network before simulating.");
   }
@@ -440,15 +617,47 @@ async function simulateFunction(fn, args, ethValue = "0") {
   const data = iface.encodeFunctionData(fn.name, args);
   const tx = { to: currentAddress, data, value: ethers.parseEther(ethValue || "0") };
   if (from) tx.from = from;
-  if (fn.stateMutability === "view" || fn.stateMutability === "pure") {
+  let gas = null;
+  let gasError = null;
+  try { gas = await readProvider.estimateGas(tx); } catch (e) { gasError = e.reason || e.shortMessage || e.message || "Gas estimation failed"; }
+  let revertReason = null;
+  let returnData = null;
+  try {
     const result = await readProvider.call(tx);
-    const decoded = iface.decodeFunctionResult(fn.name, result);
-    return `✓ Read succeeded\n\n${safeStringify(decoded.length === 1 ? decoded[0] : decoded)}`;
+    if (fn.stateMutability === "view" || fn.stateMutability === "pure") {
+      const decoded = iface.decodeFunctionResult(fn.name, result);
+      returnData = safeStringify(decoded.length === 1 ? decoded[0] : decoded);
+    }
+  } catch (e) {
+    revertReason = e.reason || e.shortMessage || e.message || "Execution failed";
   }
-  const gas = await readProvider.estimateGas(tx);
-  let executionResult = "✓ eth_call simulation succeeded";
-  try { await readProvider.call(tx); } catch (e) { throw e; }
-  return `${executionResult}\n✓ Estimated gas: ${gas.toString()}\n✓ From: ${from ? shortAddress(from) : "not connected"}\n✓ Value: ${ethValue || "0"} ETH\n\nNo transaction has been sent.`;
+  const estimatedStateChange = fn.stateMutability === "view" || fn.stateMutability === "pure"
+    ? "read-only; no state change expected"
+    : fn.stateMutability === "payable"
+      ? "may modify state and transfer native currency"
+      : fn._mutabilityConfidence === "unknown"
+        ? "unknown; recovered signature may have incomplete mutability"
+        : "likely state modification";
+  return {
+    success: !revertReason && !gasError,
+    gas: gas?.toString() || null,
+    gasError,
+    revertReason,
+    estimatedStateChange,
+    returnData,
+    target: currentAddress,
+    function: functionSignature(fn),
+    from,
+    value: ethValue || "0",
+  };
+}
+
+async function simulateFunction(fn, args, ethValue = "0") {
+  const simulation = await enhancedSimulation(fn, args, ethValue);
+  if (simulation.returnData != null) {
+    return `${simulation.success ? "✓ Read succeeded" : "✕ Read failed"}\n\n${simulation.returnData}`;
+  }
+  return `${simulation.success ? "✓ eth_call simulation succeeded" : "✕ eth_call simulation failed"}\n✓ Estimated gas: ${simulation.gas || "unavailable"}${simulation.gasError ? `\n✕ Gas estimation: ${simulation.gasError}` : ""}\n✓ Target: ${shortAddress(simulation.target)}\n✓ Function: ${simulation.function}\n✓ From: ${simulation.from ? shortAddress(simulation.from) : "not connected"}\n✓ Value: ${simulation.value} ETH\n✓ Expected state effect: ${simulation.estimatedStateChange}${simulation.revertReason ? `\n✕ Revert reason: ${simulation.revertReason}` : ""}\n\nNo transaction has been sent.`;
 }
 
 async function executeTransaction(fn, args, ethValue, resultBox) {
@@ -466,8 +675,10 @@ async function executeTransaction(fn, args, ethValue, resultBox) {
     resultBox.textContent = `Transaction submitted\n\nHash: ${tx.hash}\n\nWaiting for confirmation…`;
     const receipt = await tx.wait();
     resultBox.textContent += `\nConfirmed in block ${receipt.blockNumber}.`;
+    recordCall(fn, "transaction confirmed");
   } catch (e) {
     resultBox.textContent = `Transaction blocked/failed: ${e.reason || e.shortMessage || e.message || e}`;
+    recordCall(fn, "transaction failed");
   }
 }
 
@@ -495,6 +706,7 @@ function loadDemoContract() {
 
 window.addEventListener("DOMContentLoaded", () => {
   populateNetworkSelect();
+  renderHistory();
   $("connect-btn").addEventListener("click", connectWallet);
   $("load-btn").addEventListener("click", decodeContract);
   $("demo-btn").addEventListener("click", loadDemoContract);
