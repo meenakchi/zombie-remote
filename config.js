@@ -5,7 +5,7 @@
 
 window.ZOMBIE_CONFIG = {
   // Free key from https://etherscan.io/myapikey
-  ETHERSCAN_API_KEY: "",
+  ETHERSCAN_API_KEY: "NUMAZGXN73EC6B9B3PYC9IDWNWZXQ8CHWN",
 
   // Etherscan-family explorer API bases you want selectable in the network dropdown.
   // (Etherscan v2 unified API covers all of these off one key as of 2024/2025 —
@@ -39,16 +39,17 @@ window.ZOMBIE_CONFIG = {
       label: "Ethereum Sepolia (Testnet)",
       chainId: 11155111,
       explorerApi: "https://api-sepolia.etherscan.io/api",
-      rpc: "https://rpc.ankr.com/eth_sepolia",
+     rpc: "https://ethereum-sepolia-rpc.publicnode.com",
     },
   },
 
   DEFAULT_NETWORK: "ethereum",
 
   // Set this to a real testnet contract you control for the live demo.
-  DEMO_CONTRACT: { address: "0x...", network: "sepolia" },
-
-  // Safety switch for live demos — read/simulate always works regardless.
+DEMO_CONTRACT: {
+  address: "0x7b79995e5f793a07bc00c21412e50ecae098e7f9",
+  network: "sepolia"
+},  // Safety switch for live demos — read/simulate always works regardless.
   // Flip to true once you've tested end-to-end and want live tx sending.
   SEND_TX_ENABLED: false,
 

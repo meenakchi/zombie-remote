@@ -3,81 +3,104 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<meta name="description" content="Zombie Rescue — recovery intelligence for abandoned smart contracts." />
-<title>Zombie Rescue — Smart Contract Recovery</title>
+<meta name="description" content="zombie-remote. a command line style interface for scanning and recovering abandoned smart contracts." />
+<title>zombie-remote</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
 <link rel="stylesheet" href="style.css" />
 <script src="https://cdn.jsdelivr.net/npm/ethers@6.13.2/dist/ethers.umd.min.js"></script>
 </head>
 <body>
-  <main class="container">
-    <header class="hero">
-      <div class="eyebrow">WEB3 RECOVERY INTELLIGENCE</div>
-      <h1>🧟 Zombie Rescue</h1>
-      <p class="hero-copy">Turn abandoned smart contracts into explainable, simulated, and safely recoverable assets.</p>
-      <div class="hero-flow"><span>SCAN</span><b>→</b><span>DISCOVER</span><b>→</b><span>SIMULATE</span><b>→</b><span>RESCUE</span></div>
+  <main class="shell">
+
+    <div class="titlebar">
+      <div class="dots"><span></span><span></span><span></span></div>
+      <div class="tab">zombie-remote.sh</div>
+      <div class="conn"><span id="conn-dot" class="conn-dot"></span><span class="conn-label">session</span></div>
+    </div>
+
+    <header class="boot">
+      <div class="brand">&gt;_ zombie-remote</div>
+      <p class="tagline">the frontend is gone. the contract might not be. paste an address and find out what it can still do.</p>
+      <div class="pipeline"><span>scan</span><i>|</i><span>discover</span><i>|</i><span>simulate</span><i>|</i><span>rescue</span></div>
     </header>
 
-    <section class="panel">
-      <div class="section-head"><div><span class="step">01</span><h2>Connect wallet</h2></div><span class="muted">Read-only scanning works without a wallet.</span></div>
-      <div class="row">
-        <button id="connect-btn">Connect Wallet</button>
-        <span id="wallet-status" class="status-bar" role="status" aria-live="polite">Not connected</span>
+    <section class="block">
+      <div class="prompt">$ <span>wallet connect</span></div>
+      <div class="block-body row">
+        <button id="connect-btn">connect wallet</button>
+        <span id="wallet-status" class="status-line" role="status" aria-live="polite">not connected. read only scanning still works</span>
       </div>
     </section>
 
-    <section class="panel target-panel">
-      <div class="section-head"><div><span class="step">02</span><h2>Scan target contract</h2></div><button id="demo-btn" class="secondary">Load demo</button></div>
-      <div class="row">
-        <select id="network-select" aria-label="Network"></select>
-        <input type="text" id="contract-address" placeholder="0x… contract address" autocomplete="off" />
+    <section class="block">
+      <div class="prompt">$ <span>scan --address &lt;contract&gt; --network &lt;chain&gt;</span></div>
+      <div class="block-body">
+        <div class="row">
+          <select id="network-select" aria-label="Network"></select>
+          <input type="text" id="contract-address" placeholder="0x... contract address" autocomplete="off" />
+        </div>
+        <div class="row controls">
+          <input type="password" id="etherscan-key" placeholder="explorer api key" autocomplete="off" />
+          <button id="load-btn">scan contract</button>
+          <button id="demo-btn" class="secondary">try a demo address</button>
+        </div>
+        <div id="network-warning" class="warning" role="alert" hidden></div>
+        <div id="load-status" class="status-line" role="status" aria-live="polite"></div>
       </div>
-      <div class="row controls">
-        <input type="password" id="etherscan-key" placeholder="Explorer API key (optional)" autocomplete="off" />
-        <button id="load-btn">Scan Contract</button>
+    </section>
+
+    <section class="block">
+      <div class="prompt">$ <span>history --list</span></div>
+      <div class="block-body">
+        <div id="history-list" class="history-list"></div>
+        <p id="history-empty" class="dim">scanned addresses and bookmarked functions will show up here, stored only in this browser</p>
       </div>
-      <div id="network-warning" class="warning" role="alert" hidden></div>
-      <div id="load-status" class="status-bar" role="status" aria-live="polite"></div>
     </section>
 
-    <section class="panel history-panel">
-      <div class="section-head"><div><span class="step">03</span><h2>History & bookmarks</h2></div><span class="muted">Stored locally in this browser</span></div>
-      <div id="history-list" class="history-list"></div>
-      <p id="history-empty" class="muted">Your scanned functions and bookmarks will appear here.</p>
-    </section>
-
-    <section id="scan-summary" class="panel summary-panel" hidden>
-      <div class="section-head"><div><span class="step">04</span><h2>Recovery intelligence</h2></div><span id="contract-status" class="pill">—</span></div>
-      <div class="summary-grid">
-        <div class="metric"><span>Native balance</span><strong id="native-balance">—</strong></div>
-        <div class="metric"><span>Recovery paths</span><strong id="recovery-count">—</strong></div>
-        <div class="metric"><span>Best confidence</span><strong id="recovery-score">—</strong></div>
-        <div class="metric"><span>Owner analysis</span><strong id="owner-status">—</strong></div>
-        <div class="metric"><span>Proxy analysis</span><strong id="proxy-status">—</strong></div>
-        <div class="metric"><span>Token balances</span><strong id="token-status">—</strong></div>
-        <div class="metric"><span>Recent activity</span><strong id="activity-status">—</strong></div>
-        <div class="metric"><span>Risk score</span><strong id="risk-status">—</strong></div>
+    <section id="scan-summary" class="block output" hidden>
+      <div class="prompt">&gt; <span>recon summary</span><span id="contract-status" class="tag"></span></div>
+      <div class="block-body">
+        <div class="metrics">
+          <div class="metric"><span>native balance</span><strong id="native-balance">n/a</strong></div>
+          <div class="metric"><span>recovery paths</span><strong id="recovery-count">n/a</strong></div>
+          <div class="metric"><span>best confidence</span><strong id="recovery-score">n/a</strong></div>
+          <div class="metric"><span>owner analysis</span><strong id="owner-status">n/a</strong></div>
+          <div class="metric"><span>proxy analysis</span><strong id="proxy-status">n/a</strong></div>
+        </div>
+        <p class="note">safety model. verified functions can be simulated and, if enabled, executed. functions reconstructed from bytecode stay simulation only.</p>
       </div>
-      <div class="notice"><strong>Safety model:</strong> verified functions can be simulated and, when enabled, executed. Bytecode-reconstructed functions remain simulation-only.</div>
     </section>
 
-    <section id="rescue-section" class="panel rescue-panel" hidden>
-      <div class="section-head"><div><span class="step">05</span><h2>Possible rescue paths</h2></div><button id="export-btn" class="secondary">Export ABI</button></div>
-      <div id="rescue-list"></div>
+    <section id="rescue-section" class="block output" hidden>
+      <div class="prompt">&gt; <span>possible rescue paths</span></div>
+      <div class="block-body">
+        <div class="row section-tools"><button id="export-btn" class="secondary">export abi</button></div>
+        <div id="rescue-list" class="fn-list"></div>
+      </div>
     </section>
 
-    <section id="all-functions-section" class="panel" hidden>
-      <div class="section-head"><div><span class="step">06</span><h2>Contract interface</h2></div><span id="fn-source-badge"></span></div>
-      <div id="all-functions-list"></div>
+    <section id="all-functions-section" class="block output" hidden>
+      <div class="prompt">&gt; <span>contract interface</span><span id="fn-source-badge"></span></div>
+      <div class="block-body">
+        <div id="all-functions-list" class="fn-list"></div>
+      </div>
     </section>
 
-    <section id="empty-panel" class="panel empty-panel">
-      <div class="empty-state"><div class="empty-icon">🧟</div><h2>Find the zombie</h2><p>Paste an EVM contract address to inspect its bytecode, assets, access control, and potential recovery paths.</p></div>
+    <section id="empty-panel" class="block empty">
+      <div class="empty-state">
+        <div class="empty-glyph">&gt;_</div>
+        <h2>waiting for a target</h2>
+        <p>drop in an evm contract address above to inspect its bytecode, its balance, its access control, and whatever paths still lead to a working function.</p>
+      </div>
     </section>
 
-    <footer>
-      <p>Zombie Rescue is an analysis and safety tool. Never sign a transaction you do not understand.</p>
-      <p>Verified ABI data comes from the configured explorer. Unverified contracts use best-effort EVM selector analysis.</p>
+    <footer class="comments">
+      <p># zombie-remote is an analysis and safety tool. never sign a transaction you do not understand.</p>
+      <p># verified abi data comes from the configured explorer. unverified contracts rely on best effort selector analysis, treat every guess as a lead, not a fact.</p>
     </footer>
+
   </main>
   <script src="config.example.js"></script>
   <script src="config.js" onerror="void 0"></script>

@@ -1,4 +1,4 @@
-/* Zombie Rescue — contract recovery intelligence UI (ethers v6) */
+/* zombie-remote. contract recovery intelligence shell (ethers v6) */
 let provider = null;
 let signer = null;
 let currentAbi = [];
@@ -15,11 +15,15 @@ function setStatus(id, msg, kind = "") {
   const el = $(id);
   if (!el) return;
   el.textContent = msg;
-  el.className = `status-bar ${kind}`.trim();
+  el.className = `status-line ${kind}`.trim();
+  if (id === "wallet-status") {
+    const dot = $("conn-dot");
+    if (dot) dot.className = `conn-dot ${kind === "ok" ? "live" : kind === "error" ? "warn" : ""}`.trim();
+  }
 }
 
 function shortAddress(address) {
-  return address ? `${address.slice(0, 6)}…${address.slice(-4)}` : "—";
+  return address ? `${address.slice(0, 6)}…${address.slice(-4)}` : "n/a";
 }
 
 function safeStringify(value) {
@@ -85,7 +89,7 @@ function renderHistory() {
       const button = document.createElement("button");
       button.type = "button";
       button.className = "history-item";
-      button.textContent = `${item.kind === "bookmark" ? "★" : "↗"} ${item.signature} · ${item.networkKey}`;
+      button.textContent = `${item.kind === "bookmark" ? "[fav]" : "[hit]"} ${item.signature} · ${item.networkKey}`;
       button.title = item.address;
       button.addEventListener("click", () => {
         $("contract-address").value = item.address;
@@ -270,78 +274,16 @@ function scoreLabel(score) {
   return "LOW CONFIDENCE";
 }
 
-const ERC20_ABI = [
-  "function balanceOf(address) view returns (uint256)",
-  "function decimals() view returns (uint8)",
-  "function symbol() view returns (string)",
-];
-
-const COMMON_TOKENS = {
-  ethereum: [
-    ["USDC", "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"],
-    ["USDT", "0xdAC17F958D2ee523a2206206994597C13D831ec7"],
-    ["DAI", "0x6B175474E89094C44Da98b954EedeAC495271d0F"],
-  ],
-  polygon: [["USDC.e", "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"]],
-};
-
-async function detectTokenBalances(address, networkKey) {
-  const readProvider = getReadProvider(networkKey);
-  const balances = [];
-  for (const [knownSymbol, tokenAddress] of COMMON_TOKENS[networkKey] || []) {
-    try {
-      const contract = new ethers.Contract(tokenAddress, ERC20_ABI, readProvider);
-      const balance = await contract.balanceOf(address);
-      if (balance > 0n) {
-        const [decimals, symbol] = await Promise.all([contract.decimals(), contract.symbol().catch(() => knownSymbol)]);
-        balances.push({ token: tokenAddress, balance, symbol: symbol || knownSymbol, decimals: Number(decimals) });
-      }
-    } catch (_) {
-      // A missing token or restricted RPC should not abort the contract scan.
-    }
-  }
-  return balances;
-}
-
-async function analyzeRecentActivity(address, networkKey) {
-  try {
-    const readProvider = getReadProvider(networkKey);
-    const latest = await readProvider.getBlockNumber();
-    const from = Math.max(0, latest - 5000);
-    const logs = await readProvider.getLogs({ address, fromBlock: from, toBlock: latest });
-    const transferTopic = ethers.id("Transfer(address,address,uint256)").toLowerCase();
-    const transfers = logs.filter((log) => log.topics[0]?.toLowerCase() === transferTopic);
-    return { recentActivityBlocks: latest - from, eventCount: logs.length, transfers: transfers.length, lastActive: transfers.length ? "Recently" : "Dormant" };
-  } catch (_) {
-    return { recentActivityBlocks: 0, eventCount: null, transfers: null, lastActive: "Unavailable" };
-  }
-}
-
-function calculateContractRisk({ source, rescueFns, proxy, activity }) {
-  let score = 20;
-  if (source !== "verified") score += 30;
-  if (rescueFns.length) score += Math.min(20, rescueFns.length * 4);
-  if (proxy?.implementation) score += 15;
-  if (activity.lastActive === "Recently") score += 10;
-  if (rescueFns.some((fn) => isEmergencyFunction(fn.name))) score += 15;
-  return Math.min(100, score);
-}
-
 async function analyzeContract(abi, source) {
-  const [native, owner, tokens, activity] = await Promise.all([
-    getContractBalance(currentAddress, currentNetworkKey),
-    detectOwner(abi),
-    detectTokenBalances(currentAddress, currentNetworkKey),
-    analyzeRecentActivity(currentAddress, currentNetworkKey),
-  ]);
+  const native = await getContractBalance(currentAddress, currentNetworkKey);
+  const owner = await detectOwner(abi);
   let ownerMatches = null;
   if (owner && signer) ownerMatches = owner.toLowerCase() === (await signer.getAddress()).toLowerCase();
   const rescueFns = abi.filter((fn) => isRescueFunction(fn.name));
   rescueFns.forEach((fn) => {
     fn._recoveryScore = calculateRecoveryScore({ fn, source, hasNativeBalance: native.raw > 0n, ownerMatches });
   });
-  const riskScore = calculateContractRisk({ source, rescueFns, proxy: currentProxy, activity });
-  return { native, owner, ownerMatches, rescueFns, tokens, activity, riskScore };
+  return { native, owner, ownerMatches, rescueFns };
 }
 
 function renderScanSummary() {
@@ -352,18 +294,13 @@ function renderScanSummary() {
   $("recovery-count").textContent = String(currentScan.rescueFns.length);
   const scores = currentScan.rescueFns.map((f) => f._recoveryScore);
   const best = scores.length ? Math.max(...scores) : 0;
-  $("recovery-score").textContent = scores.length ? `${best}/100` : "—";
+  $("recovery-score").textContent = scores.length ? `${best}/100` : "n/a";
   $("owner-status").textContent = currentScan.owner
     ? `${shortAddress(currentScan.owner)}${currentScan.ownerMatches === true ? " · caller matches" : currentScan.ownerMatches === false ? " · caller does not match" : ""}`
     : "Not detected";
   $("proxy-status").textContent = currentScan.proxy?.implementation
     ? `${currentScan.proxy.kind} · ${shortAddress(currentScan.proxy.implementation)}${currentScan.proxy.admin ? ` · admin ${shortAddress(currentScan.proxy.admin)}` : ""}`
     : "Not detected";
-  $("token-status").textContent = currentScan.tokens.length ? currentScan.tokens.map((token) => `${token.symbol} ${ethers.formatUnits(token.balance, token.decimals)}`).join(" · ") : "None detected";
-  $("activity-status").textContent = currentScan.activity.eventCount == null
-    ? "Unavailable"
-    : `${currentScan.activity.lastActive} · ${currentScan.activity.eventCount} events · ${currentScan.activity.transfers} transfers`;
-  $("risk-status").textContent = `${currentScan.riskScore}/100 · ${currentScan.riskScore >= 70 ? "high" : currentScan.riskScore >= 40 ? "medium" : "low"}`;
   $("contract-status").textContent = currentScan.native.raw > 0n || currentScan.rescueFns.length ? "Recoverable signals found" : "No obvious rescue signal";
 }
 
@@ -383,7 +320,7 @@ async function decodeContract() {
   currentProxy = null;
   setStatus("load-status", "Scanning contract…");
   $("load-btn").disabled = true;
-  $("load-btn").textContent = "Scanning…";
+  $("load-btn").textContent = "scanning…";
 
   try {
     try {
@@ -424,7 +361,7 @@ async function decodeContract() {
     $("scan-summary").hidden = true;
   } finally {
     $("load-btn").disabled = false;
-    $("load-btn").textContent = "Scan Contract";
+    $("load-btn").textContent = "scan contract";
   }
 }
 
@@ -496,13 +433,6 @@ function buildFunctionCard(fn, source, uid) {
     warning.className = "warning function-warning";
     warning.textContent = "High-risk function name. Review access control, destination, and asset effects before simulating or signing.";
     body.appendChild(warning);
-  }
-
-  if (isGuessed && fn._candidates?.length > 1) {
-    const ambiguity = document.createElement("div");
-    ambiguity.className = "notice function-warning";
-    ambiguity.textContent = `${fn._candidates.length} possible signatures found for this selector. Showing the earliest indexed candidate; verify the signature before using it.`;
-    body.appendChild(ambiguity);
   }
 
   const inputEls = [];
@@ -606,7 +536,7 @@ function getInterface(fn) {
   return new ethers.Interface([fn]);
 }
 
-async function enhancedSimulation(fn, args, ethValue = "0") {
+async function simulateFunction(fn, args, ethValue = "0") {
   if (signer && !(await validateWalletNetwork(false))) {
     throw new Error("Switch your wallet to the selected network before simulating.");
   }
@@ -617,47 +547,15 @@ async function enhancedSimulation(fn, args, ethValue = "0") {
   const data = iface.encodeFunctionData(fn.name, args);
   const tx = { to: currentAddress, data, value: ethers.parseEther(ethValue || "0") };
   if (from) tx.from = from;
-  let gas = null;
-  let gasError = null;
-  try { gas = await readProvider.estimateGas(tx); } catch (e) { gasError = e.reason || e.shortMessage || e.message || "Gas estimation failed"; }
-  let revertReason = null;
-  let returnData = null;
-  try {
+  if (fn.stateMutability === "view" || fn.stateMutability === "pure") {
     const result = await readProvider.call(tx);
-    if (fn.stateMutability === "view" || fn.stateMutability === "pure") {
-      const decoded = iface.decodeFunctionResult(fn.name, result);
-      returnData = safeStringify(decoded.length === 1 ? decoded[0] : decoded);
-    }
-  } catch (e) {
-    revertReason = e.reason || e.shortMessage || e.message || "Execution failed";
+    const decoded = iface.decodeFunctionResult(fn.name, result);
+    return `✓ Read succeeded\n\n${safeStringify(decoded.length === 1 ? decoded[0] : decoded)}`;
   }
-  const estimatedStateChange = fn.stateMutability === "view" || fn.stateMutability === "pure"
-    ? "read-only; no state change expected"
-    : fn.stateMutability === "payable"
-      ? "may modify state and transfer native currency"
-      : fn._mutabilityConfidence === "unknown"
-        ? "unknown; recovered signature may have incomplete mutability"
-        : "likely state modification";
-  return {
-    success: !revertReason && !gasError,
-    gas: gas?.toString() || null,
-    gasError,
-    revertReason,
-    estimatedStateChange,
-    returnData,
-    target: currentAddress,
-    function: functionSignature(fn),
-    from,
-    value: ethValue || "0",
-  };
-}
-
-async function simulateFunction(fn, args, ethValue = "0") {
-  const simulation = await enhancedSimulation(fn, args, ethValue);
-  if (simulation.returnData != null) {
-    return `${simulation.success ? "✓ Read succeeded" : "✕ Read failed"}\n\n${simulation.returnData}`;
-  }
-  return `${simulation.success ? "✓ eth_call simulation succeeded" : "✕ eth_call simulation failed"}\n✓ Estimated gas: ${simulation.gas || "unavailable"}${simulation.gasError ? `\n✕ Gas estimation: ${simulation.gasError}` : ""}\n✓ Target: ${shortAddress(simulation.target)}\n✓ Function: ${simulation.function}\n✓ From: ${simulation.from ? shortAddress(simulation.from) : "not connected"}\n✓ Value: ${simulation.value} ETH\n✓ Expected state effect: ${simulation.estimatedStateChange}${simulation.revertReason ? `\n✕ Revert reason: ${simulation.revertReason}` : ""}\n\nNo transaction has been sent.`;
+  const gas = await readProvider.estimateGas(tx);
+  let executionResult = "✓ eth_call simulation succeeded";
+  try { await readProvider.call(tx); } catch (e) { throw e; }
+  return `${executionResult}\n✓ Estimated gas: ${gas.toString()}\n✓ Target: ${shortAddress(currentAddress)}\n✓ Function: ${functionSignature(fn)}\n✓ From: ${from ? shortAddress(from) : "not connected"}\n✓ Value: ${ethValue || "0"} ETH\n\nNo transaction has been sent.`;
 }
 
 async function executeTransaction(fn, args, ethValue, resultBox) {
@@ -695,15 +593,32 @@ function exportAbi() {
 
 function loadDemoContract() {
   const demo = cfg().DEMO_CONTRACT;
-  if (!demo || !demo.address || demo.address.includes("...")) {
-    setStatus("load-status", "Set DEMO_CONTRACT.address in config.js before using the demo loader.", "error");
+
+  if (!demo || !demo.address) {
+    setStatus(
+      "load-status",
+      "Set DEMO_CONTRACT.address in config.js before using the demo loader.",
+      "error"
+    );
     return;
   }
-  $("contract-address").value = demo.address;
+
+  const address = demo.address.trim();
+
+  if (!ethers.isAddress(address)) {
+    setStatus(
+      "load-status",
+      `Demo address in config.js is invalid: ${address}`,
+      "error"
+    );
+    return;
+  }
+
+  $("contract-address").value = ethers.getAddress(address);
   $("network-select").value = demo.network || cfg().DEFAULT_NETWORK;
+
   decodeContract();
 }
-
 window.addEventListener("DOMContentLoaded", () => {
   populateNetworkSelect();
   renderHistory();
