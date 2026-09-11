@@ -4,7 +4,11 @@
 // skip re-typing your API key every demo run.
 
 window.ZOMBIE_CONFIG = {
-  // Free key from https://etherscan.io/myapikey
+  // Free key from https://etherscan.io/myapikey 
+ // NOTE: THIS IS A SAMPLE KEY FOR TESTING. 
+ // I HAVE SCRUBBED THE KEY AND REPLACED IT WITH A NEW ONE IN ANOTHER 
+ // CONFIG FILE IN GITIGNORE.
+ 
   ETHERSCAN_API_KEY: "NUMAZGXN73EC6B9B3PYC9IDWNWZXQ8CHWN",
 
   // Etherscan-family explorer API bases you want selectable in the network dropdown.
