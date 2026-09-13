@@ -76,28 +76,43 @@ function extractSelectors(bytecodeHex) {
  * first (instant, offline), then falls back to the public 4byte.directory
  * signature database for anything unrecognized.
  */
-async function resolveSelector(selector) {
+
+async function resolveSelector(selector, retries = 1) {
   if (KNOWN_SELECTORS[selector]) {
-    return { ...KNOWN_SELECTORS[selector], candidates: [KNOWN_SELECTORS[selector]], source: "known-table" };
+    return { 
+      ...KNOWN_SELECTORS[selector], 
+      candidates: [KNOWN_SELECTORS[selector]], 
+      source: "known-table" 
+    };
   }
 
-  try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 8000);
-    const res = await fetch(`https://www.4byte.directory/api/v1/signatures/?hex_signature=${selector}`, { signal: controller.signal });
-    clearTimeout(timeout);
-    const data = await res.json();
-    if (data.results && data.results.length > 0) {
-      // 4byte.directory returns raw text signatures like "withdraw(uint256)".
-      // Multiple candidates can share a selector (collisions); take the
-      // earliest-registered one as the best guess, same convention Etherscan uses.
-      const candidates = data.results
-        .sort((a, b) => a.id - b.id)
-        .map((result) => parseSignatureText(result.text_signature));
-      return { ...candidates[0], candidates, source: "4byte.directory" };
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const controller = new AbortController();
+      const timeoutMs = 6000 + (attempt * 1000); // 6s, 7s backoff
+      const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+      
+      const res = await fetch(
+        `https://www.4byte.directory/api/v1/signatures/?hex_signature=${selector}`,
+        { signal: controller.signal }
+      );
+      clearTimeout(timeoutId);
+      
+      const data = await res.json();
+      if (data.results && data.results.length > 0) {
+        const candidates = data.results
+          .sort((a, b) => a.id - b.id)
+          .map((result) => parseSignatureText(result.text_signature));
+        return { ...candidates[0], candidates, source: "4byte.directory" };
+      }
+      break; // No results = don't retry
+      
+    } catch (e) {
+      console.warn(`resolveSelector attempt ${attempt + 1}/${retries + 1} failed for ${selector}`);
+      if (attempt < retries) {
+        await new Promise(r => setTimeout(r, 500 * Math.pow(2, attempt)));
+      }
     }
-  } catch (e) {
-    // Offline / rate-limited — fall through to unknown.
   }
 
   return { name: `unknown_${selector.slice(2, 8)}`, inputs: [], candidates: [], source: "unresolved" };
@@ -132,23 +147,62 @@ function parseSignatureText(sig) {
 async function buildGuessedAbi(bytecodeHex) {
   const selectors = extractSelectors(bytecodeHex);
   const abi = [];
+  const unknownSelectors = [];
 
+  // First pass: batch known selectors
   for (const selector of selectors) {
-    const resolved = await resolveSelector(selector);
-    abi.push({
-      type: "function",
-      name: resolved.name,
-      selector,
-      inputs: resolved.inputs,
-      outputs: [], // unknown without source — renderer treats these as best-effort
-      stateMutability: "nonpayable", // unknown; safest assumption for the UI to warn on
-      _mutabilityConfidence: "unknown",
-      _candidates: resolved.candidates || [],
-      _decoded: true,
-      _source: resolved.source,
-    });
+    if (KNOWN_SELECTORS[selector]) {
+      abi.push({
+        type: "function",
+        name: KNOWN_SELECTORS[selector].name,
+        selector,
+        inputs: KNOWN_SELECTORS[selector].inputs,
+        outputs: [],
+        stateMutability: "nonpayable",
+        _mutabilityConfidence: "unknown",
+        _candidates: [],
+        _decoded: true,
+        _source: "known-table",
+      });
+    } else {
+      unknownSelectors.push(selector);
+    }
   }
+
+  // Second pass: batch unknown selectors in parallel with rate limiting
+  const BATCH_SIZE = 3;
+  const BATCH_DELAY_MS = 600;
+
+  for (let i = 0; i < unknownSelectors.length; i += BATCH_SIZE) {
+    const batch = unknownSelectors.slice(i, i + BATCH_SIZE);
+    const results = await Promise.all(
+      batch.map(sel => resolveSelector(sel))
+    );
+
+    results.forEach((resolved, idx) => {
+      const selector = batch[idx];
+      abi.push({
+        type: "function",
+        name: resolved.name,
+        selector,
+        inputs: resolved.inputs,
+        outputs: [],
+        stateMutability: "nonpayable",
+        _mutabilityConfidence: "unknown",
+        _candidates: resolved.candidates || [],
+        _decoded: true,
+        _source: resolved.source,
+      });
+    });
+
+    // Backoff between batches
+    if (i + BATCH_SIZE < unknownSelectors.length) {
+      await new Promise(r => setTimeout(r, BATCH_DELAY_MS));
+    }
+  }
+
   return abi;
 }
-
+ 
+ 
 window.ZombieDecoder = { extractSelectors, resolveSelector, buildGuessedAbi, KNOWN_SELECTORS };

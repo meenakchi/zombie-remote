@@ -10,6 +10,84 @@
   --alert: #ff6161;
   --mono: "JetBrains Mono", "IBM Plex Mono", ui-monospace, "Courier New", monospace;
 }
+.status-line.loading {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.spinner {
+  display: inline-block;
+  width: 1rem;
+  height: 1rem;
+  border: 2px solid var(--color-dim);
+  border-top-color: var(--color-ok);
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.copy-btn {
+  padding: 0.25rem 0.5rem;
+  font-size: 0.85rem;
+  background: var(--color-dim);
+  border: 1px solid var(--color-dim);
+  color: var(--color-text);
+  cursor: pointer;
+  border-radius: 3px;
+  transition: all 0.2s;
+}
+
+.copy-btn:hover:not(:disabled) {
+  background: var(--color-ok);
+  border-color: var(--color-ok);
+}
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.modal-content {
+  background: var(--bg-card);
+  border: 1px solid var(--color-dim);
+  border-radius: 8px;
+  max-width: 500px;
+  width: 90%;
+}
+
+.modal-header {
+  padding: 1rem;
+  border-bottom: 1px solid var(--color-dim);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.modal-close {
+  background: none;
+  border: none;
+  font-size: 1.5rem;
+  cursor: pointer;
+  color: var(--color-text);
+}
+
+.modal-body {
+  padding: 1rem;
+}
+
+.copy-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
 
 * { box-sizing: border-box; }
 
